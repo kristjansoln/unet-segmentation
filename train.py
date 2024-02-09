@@ -1,7 +1,7 @@
 import argparse
 
 import numpy as np
-from tomato_dataset import DatasetFolder
+from dataset_loader import DatasetFolder
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from network import UNet
@@ -14,7 +14,6 @@ from torchmetrics.classification import BinaryJaccardIndex
 import datetime
 import time
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 
 
 def calculate_iou(predictions, masks):
@@ -35,13 +34,18 @@ if __name__ == "__main__":
 
     # arguments that can be defined upon execution of the script
     options = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    
     # options.add_argument('--train', action='store_true', help='Train the model.')
-    # options.add_argument('--test', action='store_true', help="Test the model.")
-    options.add_argument('--trainroot', default='laboro_tomato/train', help='root directory of the tomato train dataset')
-    options.add_argument('--testroot', default='laboro_tomato/test', help='root directory of the tomato test dataset')
+    # options.add_argument('--test', action='store_true', help='Test the model.')
+    
+    options.add_argument('--traincsv', default='dataset/train.csv', help='directory of the train CSV')
+    options.add_argument('--testcsv', default='dataset/test.csv', help='directory of the test CSV')
+    options.add_argument('--valcsv', default='dataset/val.csv', help='directory of the validation CSV')
+    
     options.add_argument('--batchsize', type=int, default=2, help='batch size')
     options.add_argument('--imagesize', type=int, default=(512,384), help='size of the image (height, width)')
     options.add_argument('--epochs', type=int, default=150, help='number of training epochs')
+    
     opt = options.parse_args()
 
     PRE__MEAN = [0.5, 0.5, 0.5]
@@ -64,13 +68,16 @@ if __name__ == "__main__":
     image_only_transform_test=A.Compose([A.Normalize(PRE__MEAN, PRE__STD)])
     
     # Define dataloaders
-    train_data = DatasetFolder(root=opt.trainroot, image_only_transform=image_only_transform_train, transform=image_and_mask_transform_train)
-    test_data = DatasetFolder(root=opt.testroot, image_only_transform=image_only_transform_test, transform=image_and_mask_transform_test)
+    train_data = DatasetFolder(csv=opt.traincsv, image_only_transform=image_only_transform_train, transform=image_and_mask_transform_train)
+    val_data = DatasetFolder(csv=opt.valcsv, image_only_transform=image_only_transform_test, transform=image_and_mask_transform_test)
+    test_data = DatasetFolder(csv=opt.testcsv, image_only_transform=image_only_transform_test, transform=image_and_mask_transform_test)
 
     trainloader = DataLoader(train_data, opt.batchsize, shuffle=True)
+    valloader = DataLoader(val_data, opt.batchsize, shuffle=False)
     testloader = DataLoader(test_data, opt.batchsize, shuffle=False)
 
     print(f"Train dataset stats: number of images: {len(train_data)}")
+    print(f"Validation dataset stats: number of images: {len(val_data)}")
     print(f"Test dataset stats: number of images: {len(test_data)}")
 
     if not os.path.exists('./output'):
@@ -183,8 +190,12 @@ if __name__ == "__main__":
                 row = f'Epoch {epoch}: Train loss: {avg_loss}, val loss: {avg_val_loss}, val iou: {iou}' '\n'
                 file.write(row)
 
+            if break_flag:
+                break
+            
         except KeyboardInterrupt:
-             break
+            break_flag = True
+            print("Keyboard interrupt: Breaking after next validation")
 
     print('\n----------------------------------------------------------------')
     # Print total training time

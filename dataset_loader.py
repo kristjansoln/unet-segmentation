@@ -5,8 +5,8 @@ from numpy import asarray, newaxis
 from cv2 import cvtColor, COLOR_BGR2GRAY
 
 from PIL import Image
-
 from torchvision.datasets.vision import VisionDataset
+import csv
 
 # IMAGE LOADERS
 
@@ -138,26 +138,33 @@ def make_dataset(
 
 
 class DatasetFolder(VisionDataset):
-    """A generic data loader.
+    """A data loader for the water segmentation dataset.
 
-    This default directory structure can be customized by overriding the
-    :meth:`find_classes` method.
+    The expected directory structure is as follows:
+    .
+    ├── list.csv
+    ├── RGB
+    │   ├── img1.jpg
+    │   └── ...
+    └── WASR
+        ├── img1.png
+        └── ...
 
     Args:
-        root (string): Root directory path.
+        csv (string): Path to the CSV containing a list of filenames to include.
         loader (callable): A function to load a sample given its path.
         extensions (tuple[string]): A list of allowed extensions.
             both extensions and is_valid_file should not be passed.
         image_only_transform (callable, optional): A function/transform that takes
-            in the image and transforms it, not transforming the mask. The 'image_only_transform'
-            is performed before 'transform'.
+            in the image and transforms it, not transforming the mask. The `image_only_transform`
+            is performed before `transform`.
         transform (callable, optional): A albumentations transform function/transform 
             that takes in a sample and returns a transformed version. Applies the transform 
             to both image and provided mask. This is where ToTensor() should be applied.
-            E.g, ``albumentations.RandomCrop`` for images and masks.
+            For example, use `albumentations.RandomCrop` to be performed on both images and masks.
         is_valid_file (callable, optional): A function that takes path of a file
-            and check if the file is a valid file (used to check of corrupt files)
-            both extensions and is_valid_file should not be passed.
+            and check if the file is a valid file (used to check of corrupt files).
+            Both extensions and is_valid_file should not be passed at the same time.
 
      Attributes:
         samples (list): List of (sample path, class_index) tuples
@@ -166,16 +173,16 @@ class DatasetFolder(VisionDataset):
 
     def __init__(
         self,
-        root: str,
+        csv: str,
         loader: Callable[[str], Any] = default_loader,
         extensions: Optional[Tuple[str, ...]] = None,
         transform: Optional[Callable] = None,
         image_only_transform: Optional[Callable] = None,
         is_valid_file: Optional[Callable[[str], bool]] = None,
     ) -> None:
-        super().__init__(root, transform=transform, target_transform=image_only_transform)
+        super().__init__(csv, transform=transform, target_transform=image_only_transform)
 
-        samples = self.make_dataset(self.root, extensions, is_valid_file)
+        samples = self.make_dataset(csv, extensions, is_valid_file)
 
         self.image_only_transform = image_only_transform
 
@@ -186,22 +193,19 @@ class DatasetFolder(VisionDataset):
         # self.targets = [s[1] for s in samples]
         self.masks = [s[1] for s in samples]
 
-        # Use accimage for better performance
-
     @staticmethod
     def make_dataset(
 
-        directory: str,
-        # class_to_idx: Dict[str, int],
+        csvpath: str,
         extensions: Optional[Tuple[str, ...]] = None,
         is_valid_file: Optional[Callable[[str], bool]] = None,
     ) -> List[Tuple[str, str]]:
         """Generates a list of samples of a form (path_to_sample, path_to_mask).
 
-        This function is modified to work with the laboro_tomato dataset.
+        This function is modified to work with the water segmentation dataset.
 
         Args:
-            directory (str): root dataset directory, corresponding to ``self.root``.
+            csvpath (str): path to csv.
             extensions (optional): A list of allowed extensions.
                 Either extensions or is_valid_file should be passed. Defaults to None.
             is_valid_file (optional): A function that takes path of a file
@@ -210,59 +214,52 @@ class DatasetFolder(VisionDataset):
                 is_valid_file should not be passed. Defaults to None.
 
         Raises:
-            ValueError: In case ``extensions`` and ``is_valid_file`` are None or both are not None.
-            FileNotFoundError: In case no valid file was found for any class.
+            ValueError: In case ``extensions`` and ``is_valid_file`` are None or both are not None. TODO: Check
+            FileNotFoundError: In case no valid file was found for any class. TODO: Check
 
         Returns:
             List[Tuple[str, str]]: samples of a form (path_to_sample, path_to_mask)
         """
-        # if class_to_idx is None:
-        #     # prevent potential bug since make_dataset() would use the class_to_idx logic of the
-        #     # find_classes() function, instead of using that of the find_classes() method, which
-        #     # is potentially overridden and thus could have a different logic.
-        #     raise ValueError("The class_to_idx parameter cannot be None.")
-        # return make_dataset(directory, class_to_idx, extensions=extensions, is_valid_file=is_valid_file)
 
-        img_dir = os.path.join(directory, 'images')
-        mask_dir = os.path.join(directory, 'masks')
+        img_dir = os.path.join(os.path.dirname(csvpath), 'RGB')
+        mask_dir = os.path.join(os.path.dirname(csvpath), 'WASR')
 
         # if (extensions == None) ^ (is_valid_file == None):
         #     raise ValueError("both extensions and is_valid_file should not be passed")
 
-        img_paths = []
-
-        # Get list of images
-        for root, dirs, files in os.walk(img_dir):
-            for file in files:
-                img_path = os.path.relpath(os.path.join(root, file), img_dir)
-                img_paths.append(img_path)
-                
         samples = []
 
-        # For each image, find its corresponding mask
-        for img in img_paths:
-            img_path = os.path.join(img_dir, img)
-            mask_path = os.path.join(mask_dir, img)
+        # Get list of images
+        # for root, dirs, files in os.walk(img_dir):
+        #     for file in files:
+        #         img_path = os.path.relpath(os.path.join(root, file), img_dir)
+        #         img_paths.append(img_path)
+        with open(csvpath, newline='') as csvfile:
+            reader = csv.reader(csvfile)
+            for filename in reader:
+                img_path = os.path.join(img_dir, filename[0])
+                mask_path = os.path.join(mask_dir, filename[0][:-3] + 'png')
 
-            # Check if file exists
-            if not os.path.isfile(img_path):
-                raise FileNotFoundError(f"Cant find {img_path}")
-            elif not os.path.isfile(mask_path):
-                raise FileNotFoundError(f"Cant find {mask_path}, based on image path {img_dir}")
+                # Check if file exists
+                if not os.path.isfile(img_path):
+                    raise FileNotFoundError(f"Cant find {img_path}")
+                elif not os.path.isfile(mask_path):
+                    raise FileNotFoundError(f"Cant find {mask_path}, based on image path {img_dir}")
 
-            # Check for file extensions
-            if not is_image_file(img_path):
-                raise ValueError(f"File not valid: {img_path}")
-            elif not is_image_file(mask_path):
-                raise ValueError(f"File not valid: {mask_path}")
-            
-            samples.append((img_path, mask_path))
-
+                # Check for file extensions
+                if not is_image_file(img_path):
+                    raise ValueError(f"File not valid: {img_path}")
+                elif not is_image_file(mask_path):
+                    raise ValueError(f"File not valid: {mask_path}")
+                
+                samples.append((img_path, mask_path))
+        
         # If list still empty, raise error
         if len(samples) == 0:
-            raise ValueError(f"No images found")
+            raise ValueError(f"Empty samples list")
 
         return samples
+                
 
     def find_classes(self, directory: str) -> Tuple[List[str], Dict[str, int]]:
         """Find the class folders in a dataset structured as follows::
