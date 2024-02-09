@@ -1,7 +1,7 @@
 import os
 import os.path
 from typing import Any, Callable, cast, Dict, List, Optional, Tuple, Union
-from numpy import asarray, newaxis
+from numpy import asarray, newaxis, float32
 from cv2 import cvtColor, COLOR_BGR2GRAY
 
 from PIL import Image
@@ -305,9 +305,17 @@ class DatasetFolder(VisionDataset):
         img = asarray(self.loader(img_path))
         mask = asarray(self.loader(mask_path))
 
-        # Convert mask to single channel grayscale float [0. or 1.]
-        mask = cvtColor(mask, COLOR_BGR2GRAY)/255
+
+        # Convert mask to binary water/else single channel float
+        mask = (mask == [41, 167, 224]).astype(float32)
+        mask = cvtColor(mask, COLOR_BGR2GRAY)
+        
+        # from matplotlib import pyplot as plt
+        # plt.imshow(mask, interpolation='nearest')
+        # plt.show()
+
         mask = mask[..., newaxis]
+        
 
 
         if self.image_only_transform is not None:
