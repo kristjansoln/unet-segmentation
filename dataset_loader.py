@@ -320,18 +320,32 @@ class DatasetFolder(VisionDataset):
 
         if self.image_only_transform is not None:
             transformed = self.image_only_transform(image=img)
-            img = transformed['image']
+            img_t = transformed['image']
         if self.transform is not None:
-            transformed = self.transform(image=img, mask=mask)
-            img = transformed['image']
-            mask = transformed['mask']
+            transformed = self.transform(image=img_t, mask=mask)
+            img_tt = transformed['image']
+            mask_tt = transformed['mask']
 
-        # if self.transform is not None:
-        #     img = self.transform(img)
-        # if self.target_transform is not None:
-        #     mask = self.target_transform(mask)
+        # # Display transformed images
+        # from matplotlib import pyplot as plt
+        # print(f'img_path: {img_path}')
+        # fig = plt.figure(figsize=(8, 8))
+        # fig.add_subplot(1, 4, 1)
+        # plt.imshow(img)
+        # plt.title('orig. img')
+        # fig.add_subplot(1, 4, 2)
+        # plt.imshow(img_t)
+        # plt.title('img. only transform')
+        # fig.add_subplot(1, 4, 3)
+        # plt.imshow(img_tt.permute(1, 2, 0)  )
+        # plt.title('img. final transform')
+        # fig.add_subplot(1, 4, 4)
+        # plt.imshow(mask_tt)
+        # plt.title('mask final transform')
+        # plt.show()
+        # raise(Exception)
 
-        return img, mask, img_path, mask_path
+        return img_tt, mask_tt, img_path, mask_path
 
     def __len__(self) -> int:
         return len(self.samples)
