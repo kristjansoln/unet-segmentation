@@ -1,4 +1,5 @@
 import argparse
+import sys
 import numpy as np
 from dataset_loader import DatasetFolder
 from torch.utils.data import DataLoader
@@ -11,6 +12,7 @@ from albumentations.pytorch import ToTensorV2
 import datetime
 import time
 import matplotlib.pyplot as plt
+import logging
 
 
 def calculate_iou(predictions, masks):
@@ -84,9 +86,23 @@ def test(testloader, model, device, loss_function):
 
 # TODO: Add inference which stores the resulting masks (and scores/loss?)
 
+
+def handle_exception(exc_type, exc_value, exc_traceback):
+    logging.critical("Unhandled exception", exc_info=(exc_type, exc_value, exc_traceback))
+
+
 # MAIN
     
 if __name__ == "__main__":
+
+    logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s',
+                    datefmt='%Y-%m-%d %H:%M:%S',
+                    handlers=[logging.FileHandler('./output/training.log', mode='a'),
+                              logging.StreamHandler()])
+    
+    # Log any unhandled exceptions
+    sys.excepthook = handle_exception
 
     # arguments that can be defined upon execution of the script
     options = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -97,19 +113,18 @@ if __name__ == "__main__":
     # options.add_argument('--traincsv', default='dataset/train.csv', help='directory of the train CSV')
     # options.add_argument('--testcsv', default='dataset/test.csv', help='directory of the test CSV')
     # options.add_argument('--valcsv', default='dataset/val.csv', help='directory of the validation CSV')
-    # TODO: DELETE AFTER TESTING
+    options.add_argument('--batchsize', type=int, default=1, help='batch size')
+    options.add_argument('--epochs', type=int, default=2, help='number of training epochs')
+
+    # TODO: REMOVE AFTER TESTING
     options.add_argument('--traincsv', default='dataset/val.csv', help='directory of the train CSV')
     options.add_argument('--testcsv', default='dataset/val.csv', help='directory of the test CSV')
     options.add_argument('--valcsv', default='dataset/val.csv', help='directory of the validation CSV')
-    
-    options.add_argument('--batchsize', type=int, default=1, help='batch size')
+    options.add_argument('--imagesize', type=int, default=(624, 1104), help='size of the image (height, width)') # Needs to be divisible by 16
+    # options.add_argument('--imagesize', type=int, default=(256, 256), help='size of the image (height, width)') # Needs to be divisible by 16
     # options.add_argument('--imagesize', type=int, default=(512,384), help='size of the image (height, width)')
     # options.add_argument('--imagesize', type=int, default=(622, 1104), help='size of the image (height, width)')
-    # options.add_argument('--imagesize', type=int, default=(624, 1104), help='size of the image (height, width)') # Needs to be divisible by 16
-    # TODO: DELETE AFTER TESTING
-    options.add_argument('--imagesize', type=int, default=(256, 256), help='size of the image (height, width)') # Needs to be divisible by 16
-    options.add_argument('--epochs', type=int, default=2, help='number of training epochs')
-    
+
     opt = options.parse_args()
 
     PRE__MEAN = [0.5, 0.5, 0.5]
@@ -144,14 +159,6 @@ if __name__ == "__main__":
     valloader = DataLoader(val_data, opt.batchsize, shuffle=False)
     testloader = DataLoader(test_data, opt.batchsize, shuffle=False)
 
-    print('--------- Stats --------')
-    print(f"Train dataset stats: number of images: {len(train_data)}")
-    print(f"Validation dataset stats: number of images: {len(val_data)}")
-    print(f"Test dataset stats: number of images: {len(test_data)}")
-
-    if not os.path.exists('./output'):
-        os.mkdir('./output')
-    logfile = os.path.join('./output/log.txt')
 
     # Load the CNN model
     device = "cuda:0"
@@ -180,9 +187,24 @@ if __name__ == "__main__":
 
     best_iou = 0
 
+    if not os.path.exists('./output'):
+        os.mkdir('./output')
+    
+    logfile = os.path.join('./output/log.txt')
+
+    # Print out some messages
+    logging.info('======= New training session ======')
+    logging.info('--------- Stats and config --------')
+    logging.info(f"Train dataset stats: number of images: {len(train_data)}")
+    logging.info(f"Validation dataset stats: number of images: {len(val_data)}")
+    logging.info(f"Test dataset stats: number of images: {len(test_data)}")
+    logging.info(f"Batch size: {opt.batchsize}")
+    logging.info(f"Image size: {opt.imagesize}")
+    logging.info(f"Number of epochs: {opt.epochs}")
+
     start_time = time.time()
 
-    print('------- Training -------')
+    logging.info(f'--------- Begin training ---------')
 
     for epoch in range(opt.epochs):
 
@@ -201,39 +223,23 @@ if __name__ == "__main__":
             if iou > best_iou:
                 torch.save({'epoch': epoch, 'state_dict': model.state_dict()}, './output/CNN_weights.pth')
                 best_iou = iou
-                print(f'New best, saving weights')
+                logging.info(f'New best, saving weights')
 
-            line = f'Epoch {epoch+1}/{opt.epochs}: Train loss: {avg_loss:.7f}, val. loss: {avg_val_loss:.7f}, val. IOU: {iou:.7f}, best val. IOU: {best_iou:.7f}'
-            print(line)
-
-            with open(logfile, 'a') as file:
-                # Convert data to a string and write it to the file
-                row = f'Epoch {epoch}: Train loss: {avg_loss}, val loss: {avg_val_loss}, val iou: {iou}' '\n'
-                file.write(row)
-            
+            logging.info(f'Epoch {epoch+1}/{opt.epochs}: Train loss: {avg_loss:.8f}, val. loss: {avg_val_loss:.8f}, val. IOU: {iou:.8f}, best val. IOU: {best_iou:.8f}')
+           
             # TODO: Implement early stop
             # TODO: Implement scheduler
 
         except KeyboardInterrupt:
-            with open(logfile, 'a') as file:
-                # Convert data to a string and write it to the file
-                row = f'Stopping due to keyboard interrupt' '\n'
-                print("Stopping due to keyboard interrupt")
-                file.write(row)
+            logging.warning("Stopping due to keyboard interrupt")
             break
-
     
-    print('----- End training ------')
-    # TODO: Add logging function
+    logging.info('----------- End training -----------')
     
-    # Print info
+    # Print final info
     end_time = time.time()
     elapsed_time = datetime.timedelta(seconds=(end_time - start_time))
-    with open(logfile, 'a') as file:
-        # Convert data to a string and write it to the file
-        row = f'Total training time: {elapsed_time}' '\n'
-        print(row)
-        file.write(row)
+    logging.info(f'Total training time: {elapsed_time}')
 
     # Plot loss over time
     plt.figure(figsize=(15, 10))
@@ -243,6 +249,7 @@ if __name__ == "__main__":
     plt.xlabel("epoch", fontsize=18)
     plt.ylabel("loss", fontsize=18)
     plt.legend(['Training loss', 'Validation loss'], fontsize=18)
+    # TODO: Add datetime to filename
     filename = f'loss.svg'
     plt.savefig(os.path.join('output', filename))
     
@@ -253,6 +260,7 @@ if __name__ == "__main__":
     plt.xlabel("epoch", fontsize=18)
     # plt.ylabel("EER, AUC", fontsize=18)
     plt.legend(['IoU'], fontsize=18)
+    # TODO: Add datetime to filename
     filename = f'iou.svg'
     plt.savefig( os.path.join('output', filename))
 
