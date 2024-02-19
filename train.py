@@ -139,22 +139,19 @@ if __name__ == "__main__":
     # options.add_argument('--train', action='store_true', help='Train the model.')
     # options.add_argument('--test', action='store_true', help='Test the model.')
     
-    # options.add_argument('--traincsv', default='dataset/train.csv', help='directory of the train CSV')
-    # options.add_argument('--testcsv', default='dataset/test.csv', help='directory of the test CSV')
-    # options.add_argument('--valcsv', default='dataset/val.csv', help='directory of the validation CSV')
-    options.add_argument('--batchsize', type=int, default=2, help='batch size')
-    options.add_argument('--epochs', type=int, default=2, help='number of training epochs')
-    # options.add_argument('--imagesize', type=int, default=(624, 1104), help='size of the image (height, width)') # Needs to be divisible by 16
+    options.add_argument('--traincsv', default='dataset/train.csv', help='directory of the train CSV')
+    options.add_argument('--testcsv', default='dataset/test.csv', help='directory of the test CSV')
+    options.add_argument('--valcsv', default='dataset/val.csv', help='directory of the validation CSV')
+    options.add_argument('--batchsize', type=int, default=1, help='batch size')
+    options.add_argument('--epochs', type=int, default=40, help='number of training epochs')
+    options.add_argument('--imagesize', type=int, default=(624, 1104), help='size of the image (height, width)') # Needs to be divisible by 16
     # options.add_argument('--imagesize', type=int, default=(256, 256), help='size of the image (height, width)') # Needs to be divisible by 16
 
     # TODO: REMOVE AFTER TESTING
-    options.add_argument('--traincsv', default='dataset/val.csv', help='directory of the train CSV')
-    options.add_argument('--testcsv', default='dataset/val.csv', help='directory of the test CSV')
-    options.add_argument('--valcsv', default='dataset/val.csv', help='directory of the validation CSV')
-    # options.add_argument('--imagesize', type=int, default=(624, 1104), help='size of the image (height, width)') # Needs to be divisible by 16
-    options.add_argument('--imagesize', type=int, default=(256, 256), help='size of the image (height, width)') # Needs to be divisible by 16
-    # options.add_argument('--imagesize', type=int, default=(512,384), help='size of the image (height, width)')
-    # options.add_argument('--imagesize', type=int, default=(622, 1104), help='size of the image (height, width)')
+    # options.add_argument('--traincsv', default='dataset/val.csv', help='directory of the train CSV')
+    # options.add_argument('--testcsv', default='dataset/val.csv', help='directory of the test CSV')
+    # options.add_argument('--valcsv', default='dataset/val.csv', help='directory of the validation CSV')
+    # options.add_argument('--imagesize', type=int, default=(256, 256), help='size of the image (height, width)') # Needs to be divisible by 16
 
     opt = options.parse_args()
 
@@ -199,24 +196,12 @@ if __name__ == "__main__":
     device = "cuda:0"
     model = UNet().to(device)
 
-    # Initialize the loss function and iou
-    # l_ce = torch.nn.CrossEntropyLoss()
+    # Initialize loss function
     l_bce = torch.nn.BCEWithLogitsLoss()
-    # jaccard = BinaryJaccardIndex(threshold=0.5).to(device)
-
-    # Init softmax layer
-    # softmax = torch.nn.Softmax(dim=1)
-    # sigmoid = torch.nn.Sigmoid()
-
-    # Conversion from BGR to single channel grayscale images - for masks
-    # to_gray = torch.nn.Conv2d(in_channels=3, out_channels=1, kernel_size=1)
-    # gray_kernel = torch.FloatTensor([[[[0.114]], [[0.587]], [[0.299]]]])
-    # to_gray.weight = torch.nn.Parameter(gray_kernel, requires_grad=False)
 
     # Initialize optimizer and scheduler
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, betas=(0.9, 0.999))
-    # scheduler = ReduceLROnPlateau(optimizer, mode='min', threshold_mode='rel', factor=0.1, patience=20, threshold=0.01, cooldown=0, eps=1e-5,verbose=True)
-
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, betas=(0.9, 0.999))
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', threshold_mode='rel', factor=0.1, patience=4, threshold=0.01, cooldown=0, eps=1e-5, verbose=True) 
 
     train_loss_over_time = []
     val_loss_over_time = []
@@ -258,14 +243,17 @@ if __name__ == "__main__":
 
             # Save network weights if better than previous best
             if iou > best_iou:
-                torch.save({'epoch': epoch, 'state_dict': model.state_dict()}, './output/CNN_weights.pth')
+                torch.save({'epoch': epoch, 'state_dict': model.state_dict()}, './output/weights.pth')
                 best_iou = iou
                 logging.info(f'New best, saving weights')
 
-            logging.info(f'Epoch {epoch+1}/{opt.epochs}: Train loss:{avg_loss:.8f},v.loss:{avg_val_loss:.8f},v.IOU:{iou:.8f},v.precision:{precision:.8f},v.recall:{recall:.8f},v.f1:{f1:.8f},best v.IOU:{best_iou:.8f}')
+            curr_lr = optimizer.state_dict()['param_groups'][0]['lr']
+            logging.info(f'Epoch {epoch+1}/{opt.epochs}: Train loss:{avg_loss:.8f},curr.lr:{curr_lr},v.loss:{avg_val_loss:.8f},v.IOU:{iou:.8f},v.precision:{precision:.8f},v.recall:{recall:.8f},v.f1:{f1:.8f},best v.IOU:{best_iou:.8f}')
            
-            # TODO: Implement early stop
-            # TODO: Implement scheduler
+            # Early stop: If scheduler reached the lr limit and there are too many bad epochs, early stop
+            if (scheduler.num_bad_epochs >= scheduler.patience) and (optimizer.state_dict()['param_groups'][0]['lr'] * scheduler.factor < scheduler.eps):
+                logging.warning(f'Stopping due to too many bad epochs')
+                break
 
         except KeyboardInterrupt:
             logging.warning("Stopping due to keyboard interrupt")
