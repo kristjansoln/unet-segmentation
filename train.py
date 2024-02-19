@@ -5,6 +5,7 @@ from dataset_loader import DatasetFolder
 from torch.utils.data import DataLoader
 from network import UNet
 import torch
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm import tqdm
 import os
 import albumentations as A
@@ -15,16 +16,33 @@ import matplotlib.pyplot as plt
 import logging
 
 
-def calculate_iou(predictions, masks):
-    # pred and gt are binary tensors with shape [batch_size, ...]
-
-    pred = torch.squeeze(predictions)
-    gt = torch.squeeze(masks)
-
+def calculate_iou(pred, gt):
     intersection = torch.logical_and(pred, gt)
     union = torch.logical_or(pred, gt)
-    iou = torch.sum(intersection) / torch.sum(union)
+    iou = torch.sum(intersection, [1, 2]) / torch.sum(union, [1, 2])
     return iou.mean()
+
+
+def calculate_f1(pred, gt):
+    intersection = torch.logical_and(pred, gt)
+    f1 = 2*torch.sum(intersection, [1,2]) / (torch.sum(pred, [1,2]) + torch.sum(gt, [1,2])) 
+    return f1.mean()
+
+
+def calculate_precision(pred, gt):
+    TP = torch.logical_and(pred == 1, gt == 1)
+    FP = torch.logical_and(pred == 1, gt == 0)
+    precision = torch.sum(TP, [1,2]) / (torch.sum(TP, [1,2]) + torch.sum(FP, [1,2]))
+    return precision.mean()
+
+
+def calculate_recall(pred, gt):
+    TP = torch.logical_and(pred == 1, gt == 1)
+    FN = torch.logical_and(pred == 0, gt == 1)
+    recall = torch.sum(TP, [1,2]) / (torch.sum(TP, [1,2]) + torch.sum(FN, [1,2]))    
+    return recall.mean()
+
+
 
 
 # Base training function
@@ -57,6 +75,9 @@ def test(testloader, model, device, loss_function):
     
     model.eval()
     iou = []
+    precision = []
+    recall = []
+    f1 = []
     avg_val_loss = []
 
     with torch.no_grad():
@@ -69,7 +90,11 @@ def test(testloader, model, device, loss_function):
             
             # Calculate IoU for training data
             predicted_masks_bin = torch.sigmoid(out) > 0.5
+
             iou.append(calculate_iou(predicted_masks_bin, masks).cpu().numpy())
+            precision.append(calculate_precision(predicted_masks_bin, masks).cpu().numpy())
+            recall.append(calculate_recall(predicted_masks_bin, masks).cpu().numpy())
+            f1.append(calculate_f1(predicted_masks_bin, masks).cpu().numpy())
 
             avg_val_loss.append(loss_function(predictions, masks).cpu().detach().numpy())
 
@@ -78,10 +103,14 @@ def test(testloader, model, device, loss_function):
             # plt.imshow(predicted_masks_bin[0].cpu())
             # plt.show()
 
-    iou = np.mean(iou)  # Calculate the total accuracy of the model
+    # Calculate total performance of the model
+    iou = np.mean(iou)
+    precision = np.mean(precision)
+    recall = np.mean(recall)
+    f1 = np.mean(f1)
     avg_val_loss = np.mean(avg_val_loss)
 
-    return iou, avg_val_loss
+    return iou, precision, recall, f1, avg_val_loss
 
 # TODO: Add inference which stores the resulting masks (and scores/loss?)
 
@@ -113,7 +142,7 @@ if __name__ == "__main__":
     # options.add_argument('--traincsv', default='dataset/train.csv', help='directory of the train CSV')
     # options.add_argument('--testcsv', default='dataset/test.csv', help='directory of the test CSV')
     # options.add_argument('--valcsv', default='dataset/val.csv', help='directory of the validation CSV')
-    options.add_argument('--batchsize', type=int, default=1, help='batch size')
+    options.add_argument('--batchsize', type=int, default=2, help='batch size')
     options.add_argument('--epochs', type=int, default=2, help='number of training epochs')
     # options.add_argument('--imagesize', type=int, default=(624, 1104), help='size of the image (height, width)') # Needs to be divisible by 16
     # options.add_argument('--imagesize', type=int, default=(256, 256), help='size of the image (height, width)') # Needs to be divisible by 16
@@ -184,12 +213,18 @@ if __name__ == "__main__":
     # gray_kernel = torch.FloatTensor([[[[0.114]], [[0.587]], [[0.299]]]])
     # to_gray.weight = torch.nn.Parameter(gray_kernel, requires_grad=False)
 
-    # Initialize optimizer
+    # Initialize optimizer and scheduler
     optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, betas=(0.9, 0.999))
+    # scheduler = ReduceLROnPlateau(optimizer, mode='min', threshold_mode='rel', factor=0.1, patience=20, threshold=0.01, cooldown=0, eps=1e-5,verbose=True)
+
 
     train_loss_over_time = []
     val_loss_over_time = []
     val_iou_over_time = []
+    val_precision_over_time = []
+    val_recall_over_time = []
+    val_f1_over_time = []
+    
     best_iou = 0
 
     # Print out some messages
@@ -213,11 +248,13 @@ if __name__ == "__main__":
             avg_loss = train(trainloader, model, device, optimizer, l_bce)
             train_loss_over_time.append(avg_loss)
 
-            # Validation
-            # TODO: Add better performance measures
-            iou, avg_val_loss = test(testloader, model, device, l_bce)
-            val_iou_over_time.append(iou)
+            # Validation            
+            iou, precision, recall, f1, avg_val_loss = test(testloader, model, device, l_bce)
             val_loss_over_time.append(avg_val_loss)
+            val_iou_over_time.append(iou)
+            val_precision_over_time.append(precision)
+            val_recall_over_time.append(recall)
+            val_f1_over_time.append(f1)
 
             # Save network weights if better than previous best
             if iou > best_iou:
@@ -225,7 +262,7 @@ if __name__ == "__main__":
                 best_iou = iou
                 logging.info(f'New best, saving weights')
 
-            logging.info(f'Epoch {epoch+1}/{opt.epochs}: Train loss: {avg_loss:.8f}, val. loss: {avg_val_loss:.8f}, val. IOU: {iou:.8f}, best val. IOU: {best_iou:.8f}')
+            logging.info(f'Epoch {epoch+1}/{opt.epochs}: Train loss:{avg_loss:.8f},v.loss:{avg_val_loss:.8f},v.IOU:{iou:.8f},v.precision:{precision:.8f},v.recall:{recall:.8f},v.f1:{f1:.8f},best v.IOU:{best_iou:.8f}')
            
             # TODO: Implement early stop
             # TODO: Implement scheduler
@@ -254,7 +291,7 @@ if __name__ == "__main__":
     filename = f'loss-{current_datetime}.svg'
     plt.savefig(os.path.join('output', filename))
     
-    # Plot equal error rate over time
+    # Plot IOU over time
     plt.figure(figsize=(15, 10))
     plt.plot(range(len(val_iou_over_time[1:])), val_iou_over_time[1:], c="dodgerblue")
     plt.title("IoU per epoch", fontsize=18)
@@ -262,6 +299,16 @@ if __name__ == "__main__":
     # plt.ylabel("EER, AUC", fontsize=18)
     plt.legend(['IoU'], fontsize=18)
     filename = f'iou-{current_datetime}.svg'
+    plt.savefig( os.path.join('output', filename))
+    
+    # Plot F1 over time
+    plt.figure(figsize=(15, 10))
+    plt.plot(range(len(val_f1_over_time[1:])), val_f1_over_time[1:], c="dodgerblue")
+    plt.title("F1 per epoch", fontsize=18)
+    plt.xlabel("epoch", fontsize=18)
+    # plt.ylabel("EER, AUC", fontsize=18)
+    plt.legend(['F1'], fontsize=18)
+    filename = f'f1-{current_datetime}.svg'
     plt.savefig( os.path.join('output', filename))
 
     plt.show()
