@@ -3,6 +3,7 @@ import sys
 import numpy as np
 from dataset_loader import DatasetFolder
 from torch.utils.data import DataLoader
+from torchvision.utils import save_image
 from network import UNet
 import torch
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -43,8 +44,6 @@ def calculate_recall(pred, gt):
     return recall.mean()
 
 
-
-
 # Base training function
 def train(trainloader, model, device, optimizer, loss_function):
 
@@ -54,24 +53,22 @@ def train(trainloader, model, device, optimizer, loss_function):
     for images, masks, img_paths, mask_paths in tqdm(trainloader):
 
         images, masks = images.to(device), masks.to(device)
-        optimizer.zero_grad() # Set all gradients to 0
+        optimizer.zero_grad()
 
-        predictions = model(images) # Feedforward
-        # out = softmax(predictions)
-        # out = sigmoid(predictions)
+        predictions = model(images)
         
-        loss = loss_function(predictions, masks) # Calculate the error of the current batch
+        loss = loss_function(predictions, masks)
         avg_loss.append(loss.cpu().detach().numpy())
 
-        loss.backward() # Calculate gradients with backpropagation
-        optimizer.step() # optimize weights for the next batch
+        loss.backward()
+        optimizer.step()
 
     avg_loss = np.mean(avg_loss)
     return avg_loss
 
 
 # Base validation/testing function
-def test(testloader, model, device, loss_function):
+def test(testloader, model, device, loss_function, save_results=False):
     
     model.eval()
     iou = []
@@ -81,27 +78,28 @@ def test(testloader, model, device, loss_function):
     avg_val_loss = []
 
     with torch.no_grad():
-        # for images, masks, img_paths, mask_paths in tqdm(testloader):
         for images, masks, img_paths, mask_paths in tqdm(testloader):
             images, masks = images.to(device), masks.to(device)
 
             predictions = model(images)
             out = torch.sigmoid(predictions)
             
-            # Calculate IoU for training data
             predicted_masks_bin = torch.sigmoid(out) > 0.5
 
+            # Calculate performance
+            avg_val_loss.append(loss_function(predictions, masks).cpu().detach().numpy())
             iou.append(calculate_iou(predicted_masks_bin, masks).cpu().numpy())
             precision.append(calculate_precision(predicted_masks_bin, masks).cpu().numpy())
             recall.append(calculate_recall(predicted_masks_bin, masks).cpu().numpy())
             f1.append(calculate_f1(predicted_masks_bin, masks).cpu().numpy())
 
-            avg_val_loss.append(loss_function(predictions, masks).cpu().detach().numpy())
-
-            # plt.imshow(masks[0].cpu())
-            # plt.show()
-            # plt.imshow(predicted_masks_bin[0].cpu())
-            # plt.show()
+            if save_results:
+                if not os.path.exists('./output/test_output'):
+                    os.mkdir('./output/test_output')
+                for i in range(predicted_masks_bin.shape[0]):
+                    filename = os.path.basename(mask_paths[i])
+                    img = torch.repeat_interleave(predicted_masks_bin[i, :, :, :], 3, dim=2).permute([2, 0, 1]) # Convert to 3 channels?
+                    save_image(img.float(), os.path.join('./output/test_output', filename))
 
     # Calculate total performance of the model
     iou = np.mean(iou)
@@ -112,14 +110,13 @@ def test(testloader, model, device, loss_function):
 
     return iou, precision, recall, f1, avg_val_loss
 
-# TODO: Add inference which stores the resulting masks (and scores/loss?)
 
 # Log any unhandled exceptions
 def handle_exception(exc_type, exc_value, exc_traceback):
     logging.critical("Unhandled exception", exc_info=(exc_type, exc_value, exc_traceback))
 
+
 # MAIN
-    
 if __name__ == "__main__":
 
     if not os.path.exists('./output'):
@@ -135,18 +132,16 @@ if __name__ == "__main__":
 
     # arguments that can be defined upon execution of the script
     options = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    
-    # options.add_argument('--train', action='store_true', help='Train the model.')
-    # options.add_argument('--test', action='store_true', help='Test the model.')
-    
+    options.add_argument('--train', action='store_true', default=False, help='Train the model.')
+    options.add_argument('--test', action='store_true', default=False, help='Test the model.')    
     options.add_argument('--traincsv', default='dataset/train.csv', help='directory of the train CSV')
     options.add_argument('--testcsv', default='dataset/test.csv', help='directory of the test CSV')
     options.add_argument('--valcsv', default='dataset/val.csv', help='directory of the validation CSV')
     options.add_argument('--batchsize', type=int, default=1, help='batch size')
     options.add_argument('--epochs', type=int, default=40, help='number of training epochs')
-    options.add_argument('--imagesize', type=int, default=(624, 1104), help='size of the image (height, width)') # Needs to be divisible by 16
-    # options.add_argument('--imagesize', type=int, default=(256, 256), help='size of the image (height, width)') # Needs to be divisible by 16
-
+    options.add_argument('--imagesize', type=int, default=(528, 960), help='size of the image (height, width)') # Needs to be divisible by 16
+    # options.add_argument('--imagesize', type=int, default=(624, 1104), help='size of the image (height, width)') # Needs to be divisible by 16
+    
     # TODO: REMOVE AFTER TESTING
     # options.add_argument('--traincsv', default='dataset/val.csv', help='directory of the train CSV')
     # options.add_argument('--testcsv', default='dataset/val.csv', help='directory of the test CSV')
@@ -165,8 +160,9 @@ if __name__ == "__main__":
                                             ToTensorV2()])
     
     image_only_transform_train=A.Compose([
-                                        A.GaussNoise(var_limit=(1.0, 10.0), mean=0, per_channel=True, always_apply=False, p=0.5), # TODO: Experiment with this. It seems very subtle.
-                                        A.HueSaturationValue(hue_shift_limit=10, sat_shift_limit=20, val_shift_limit=10, always_apply=False, p=0.5),
+                                        # TODO: Experiment with enabling this
+                                        # A.GaussNoise(var_limit=(1.0, 10.0), mean=0, per_channel=True, always_apply=False, p=0.5), 
+                                        # A.HueSaturationValue(hue_shift_limit=10, sat_shift_limit=20, val_shift_limit=10, always_apply=False, p=0.5),
                                         A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, brightness_by_max=True, always_apply=False, p=0.5),
                                         A.Normalize(PRE__MEAN, PRE__STD),
                                         # A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225), max_pixel_value=255.0, always_apply=False, p=1.0),
@@ -181,7 +177,6 @@ if __name__ == "__main__":
                                          A.Resize(621, 1104) # Convert the image to original mask dimensions to avoid errors
                                          ]) 
     
-
     # Define dataloaders
     train_data = DatasetFolder(csv=opt.traincsv, image_only_transform=image_only_transform_train, transform=image_and_mask_transform_train)
     val_data = DatasetFolder(csv=opt.valcsv, image_only_transform=image_only_transform_test, transform=image_and_mask_transform_test)
@@ -191,7 +186,6 @@ if __name__ == "__main__":
     valloader = DataLoader(val_data, opt.batchsize, shuffle=False)
     testloader = DataLoader(test_data, opt.batchsize, shuffle=False)
 
-
     # Load the CNN model
     device = "cuda:0"
     model = UNet().to(device)
@@ -199,21 +193,8 @@ if __name__ == "__main__":
     # Initialize loss function
     l_bce = torch.nn.BCEWithLogitsLoss()
 
-    # Initialize optimizer and scheduler
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, betas=(0.9, 0.999))
-    scheduler = ReduceLROnPlateau(optimizer, mode='min', threshold_mode='rel', factor=0.1, patience=4, threshold=0.01, cooldown=0, eps=1e-5, verbose=True) 
-
-    train_loss_over_time = []
-    val_loss_over_time = []
-    val_iou_over_time = []
-    val_precision_over_time = []
-    val_recall_over_time = []
-    val_f1_over_time = []
-    
-    best_iou = 0
-
     # Print out some messages
-    logging.info('======= New training session ======')
+    logging.info('=========== New session ===========')
     logging.info('--------- Stats and config --------')
     logging.info(f"Train dataset stats: number of images: {len(train_data)}")
     logging.info(f"Validation dataset stats: number of images: {len(val_data)}")
@@ -222,49 +203,74 @@ if __name__ == "__main__":
     logging.info(f"Image size: {opt.imagesize}")
     logging.info(f"Number of epochs: {opt.epochs}")
 
-    start_time = time.time()
 
-    logging.info(f'--------- Begin training ---------')
+    if opt.train:
 
-    for epoch in range(opt.epochs):
+        # Initialize optimizer and scheduler
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, betas=(0.9, 0.999))
+        scheduler = ReduceLROnPlateau(optimizer, mode='min', threshold_mode='rel', factor=0.1, patience=3, threshold=0.01, cooldown=0, eps=1e-5, verbose=True) 
 
-        try:
-            # Train
-            avg_loss = train(trainloader, model, device, optimizer, l_bce)
-            train_loss_over_time.append(avg_loss)
+        train_loss_over_time = []
+        val_loss_over_time = []
+        val_iou_over_time = []
+        val_precision_over_time = []
+        val_recall_over_time = []
+        val_f1_over_time = []
+        
+        best_iou = 0
 
-            # Validation            
-            iou, precision, recall, f1, avg_val_loss = test(testloader, model, device, l_bce)
-            val_loss_over_time.append(avg_val_loss)
-            val_iou_over_time.append(iou)
-            val_precision_over_time.append(precision)
-            val_recall_over_time.append(recall)
-            val_f1_over_time.append(f1)
 
-            # Save network weights if better than previous best
-            if iou > best_iou:
-                torch.save({'epoch': epoch, 'state_dict': model.state_dict()}, './output/weights.pth')
-                best_iou = iou
-                logging.info(f'New best, saving weights')
+        start_time = time.time()
 
-            curr_lr = optimizer.state_dict()['param_groups'][0]['lr']
-            logging.info(f'Epoch {epoch+1}/{opt.epochs}: Train loss:{avg_loss:.8f},curr.lr:{curr_lr},v.loss:{avg_val_loss:.8f},v.IOU:{iou:.8f},v.precision:{precision:.8f},v.recall:{recall:.8f},v.f1:{f1:.8f},best v.IOU:{best_iou:.8f}')
-           
-            # Early stop: If scheduler reached the lr limit and there are too many bad epochs, early stop
-            if (scheduler.num_bad_epochs >= scheduler.patience) and (optimizer.state_dict()['param_groups'][0]['lr'] * scheduler.factor < scheduler.eps):
-                logging.warning(f'Stopping due to too many bad epochs')
+        logging.info(f'--------- Begin training ---------')
+
+        for epoch in range(opt.epochs):
+
+            try:
+                # Train
+                avg_loss = train(trainloader, model, device, optimizer, l_bce)
+                train_loss_over_time.append(avg_loss)
+
+                # Validation            
+                iou, precision, recall, f1, avg_val_loss = test(valloader, model, device, l_bce)
+                val_loss_over_time.append(avg_val_loss)
+                val_iou_over_time.append(iou)
+                val_precision_over_time.append(precision)
+                val_recall_over_time.append(recall)
+                val_f1_over_time.append(f1)
+
+                # Save network weights if better than previous best
+                if iou > best_iou:
+                    torch.save({'epoch': epoch, 'state_dict': model.state_dict()}, './output/weights.pth')
+                    best_iou = iou
+                    logging.info(f'New best, saving weights')
+
+                curr_lr = optimizer.state_dict()['param_groups'][0]['lr']
+                logging.info(f'Epoch {epoch+1}/{opt.epochs}: Train loss:{avg_loss:.8f},curr.lr:{curr_lr},v.loss:{avg_val_loss:.8f},v.IOU:{iou:.8f},v.precision:{precision:.8f},v.recall:{recall:.8f},v.f1:{f1:.8f},best v.IOU:{best_iou:.8f}')
+            
+                scheduler.step(avg_val_loss)
+
+                # Early stop: If scheduler reached the lr limit and there are too many bad epochs, early stop
+                if (scheduler.num_bad_epochs >= scheduler.patience) and (optimizer.state_dict()['param_groups'][0]['lr'] * scheduler.factor < scheduler.eps):
+                    logging.warning(f'Stopping due to too many bad epochs')
+                    break
+
+            except KeyboardInterrupt:
+                logging.warning("Stopping due to keyboard interrupt")
                 break
+        
+        logging.info('----------- End training -----------')
+    
+    if opt.test:
+        logging.info(f'--------- Begin testing ---------')
+        iou, precision, recall, f1, avg_val_loss = test(testloader, model, device, l_bce, save_results=True)
+        logging.info(f'Test results: loss:{avg_val_loss:.8f},IOU:{iou:.8f},precision:{precision:.8f},recall:{recall:.8f},f1:{f1:.8f}')
+    
 
-        except KeyboardInterrupt:
-            logging.warning("Stopping due to keyboard interrupt")
-            break
-    
-    logging.info('----------- End training -----------')
-    
     # Print final info
     end_time = time.time()
     elapsed_time = datetime.timedelta(seconds=(end_time - start_time))
-    logging.info(f'Total training time: {elapsed_time}')
+    logging.info(f'Total time: {elapsed_time}')
 
     current_datetime = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -284,7 +290,7 @@ if __name__ == "__main__":
     plt.plot(range(len(val_iou_over_time[1:])), val_iou_over_time[1:], c="dodgerblue")
     plt.title("IoU per epoch", fontsize=18)
     plt.xlabel("epoch", fontsize=18)
-    # plt.ylabel("EER, AUC", fontsize=18)
+    # plt.ylabel("", fontsize=18)
     plt.legend(['IoU'], fontsize=18)
     filename = f'iou-{current_datetime}.svg'
     plt.savefig( os.path.join('output', filename))
@@ -294,7 +300,7 @@ if __name__ == "__main__":
     plt.plot(range(len(val_f1_over_time[1:])), val_f1_over_time[1:], c="dodgerblue")
     plt.title("F1 per epoch", fontsize=18)
     plt.xlabel("epoch", fontsize=18)
-    # plt.ylabel("EER, AUC", fontsize=18)
+    # plt.ylabel("", fontsize=18)
     plt.legend(['F1'], fontsize=18)
     filename = f'f1-{current_datetime}.svg'
     plt.savefig( os.path.join('output', filename))
