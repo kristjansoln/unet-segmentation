@@ -143,19 +143,18 @@ if __name__ == "__main__":
     options = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     options.add_argument('--train', action='store_true', default=False, help='Train the model.')
     options.add_argument('--test', action='store_true', default=False, help='Test the model.')    
-    options.add_argument('--traincsv', default='dataset/train.csv', help='directory of the train CSV')
-    options.add_argument('--testcsv', default='dataset/test.csv', help='directory of the test CSV')
-    options.add_argument('--valcsv', default='dataset/val.csv', help='directory of the validation CSV')
-    options.add_argument('--batchsize', type=int, default=1, help='batch size')
+    # options.add_argument('--traincsv', default='dataset/train.csv', help='directory of the train CSV')
+    # options.add_argument('--testcsv', default='dataset/test.csv', help='directory of the test CSV')
+    # options.add_argument('--valcsv', default='dataset/val.csv', help='directory of the validation CSV')
+    options.add_argument('--batchsize', type=int, default=2, help='batch size')
     options.add_argument('--epochs', type=int, default=40, help='number of training epochs')
-    options.add_argument('--imagesize', type=int, default=(528, 960), help='size of the image (height, width)') # Needs to be divisible by 16
+    # options.add_argument('--imagesize', type=int, default=(528, 960), help='size of the image (height, width)') # Needs to be divisible by 16
     # options.add_argument('--imagesize', type=int, default=(624, 1104), help='size of the image (height, width)') # Needs to be divisible by 16
     
-    # TODO: REMOVE AFTER TESTING
-    # options.add_argument('--traincsv', default='dataset/val.csv', help='directory of the train CSV')
-    # options.add_argument('--testcsv', default='dataset/val.csv', help='directory of the test CSV')
-    # options.add_argument('--valcsv', default='dataset/val.csv', help='directory of the validation CSV')
-    # options.add_argument('--imagesize', type=int, default=(256, 256), help='size of the image (height, width)') # Needs to be divisible by 16
+    options.add_argument('--traincsv', default='dataset/train_rand_short.csv', help='directory of the train CSV')
+    options.add_argument('--testcsv', default='dataset/test_rand_short.csv', help='directory of the test CSV')
+    options.add_argument('--valcsv', default='dataset/val_rand_short.csv', help='directory of the validation CSV')
+    options.add_argument('--imagesize', type=int, default=(288, 512), help='size of the image (height, width)') # Needs to be divisible by 16
 
     opt = options.parse_args()
 
@@ -166,25 +165,30 @@ if __name__ == "__main__":
     image_and_mask_transform_train=A.Compose([A.Resize(opt.imagesize[0], opt.imagesize[1]),
                                             A.HorizontalFlip(p=0.5),
                                             # A.SafeRotate (limit=5, border_mode=4, always_apply=False, p=0.5),   # TODO: Experiment with the limit
-                                            ToTensorV2()])
+                                            ToTensorV2()],
+                                            is_check_shapes=False)
     
     image_only_transform_train=A.Compose([
                                         # TODO: Experiment with enabling this
                                         # A.GaussNoise(var_limit=(1.0, 10.0), mean=0, per_channel=True, always_apply=False, p=0.5), 
                                         # A.HueSaturationValue(hue_shift_limit=10, sat_shift_limit=20, val_shift_limit=10, always_apply=False, p=0.5),
-                                        A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, brightness_by_max=True, always_apply=False, p=0.5),
                                         A.Normalize(PRE__MEAN, PRE__STD),
+                                        A.RandomBrightnessContrast(),
                                         # A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225), max_pixel_value=255.0, always_apply=False, p=1.0),
-                                        A.Resize(621, 1104), # Convert the image to original mask dimensions to avoid errors
-                                        ])
+                                        # A.Resize(621, 1104), # Convert the image to original mask dimensions to avoid errors
+                                        ],
+                                        is_check_shapes=False)
     
     image_and_mask_transform_test=A.Compose([A.Resize(opt.imagesize[0], opt.imagesize[1]),
-                                            A.HorizontalFlip(p=0.5),
-                                            ToTensorV2()])
+                                            # A.HorizontalFlip(p=0.5),
+                                            ToTensorV2()],
+                                            is_check_shapes=False)
     
     image_only_transform_test=A.Compose([A.Normalize(PRE__MEAN, PRE__STD), 
-                                         A.Resize(621, 1104) # Convert the image to original mask dimensions to avoid errors
-                                         ]) 
+                                        #  A.Resize(621, 1104) # Convert the image to original mask dimensions to avoid errors
+                                        ],
+                                        is_check_shapes=False
+                                        ) 
     
     # Define dataloaders
     train_data = DatasetFolder(csv=opt.traincsv, image_only_transform=image_only_transform_train, transform=image_and_mask_transform_train)
