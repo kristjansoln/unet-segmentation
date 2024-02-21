@@ -100,6 +100,15 @@ def test(testloader, model, device, loss_function, save_results=False):
                     filename = os.path.basename(mask_paths[i])
                     img = torch.repeat_interleave(predicted_masks_bin[i, :, :, :], 3, dim=2).permute([2, 0, 1]) # Convert to 3 channels?
                     save_image(img.float(), os.path.join('./output/test_output', filename))
+            # # DEBUG: Preverjanje, ce so maske OK
+            # # Te bi mogle bit vse pravilno narisane
+            # if save_results:
+            #     if not os.path.exists('./output/test_output_DEBUG_MASKE'):
+            #         os.mkdir('./output/test_output_DEBUG_MASKE')
+            #     for i in range(masks.shape[0]):
+            #         filename = os.path.basename(mask_paths[i])
+            #         img = torch.repeat_interleave(masks[i, :, :, :], 3, dim=2).permute([2, 0, 1]) # Convert to 3 channels?
+            #         save_image(img.float(), os.path.join('./output/test_output_DEBUG_MASKE', filename))
 
     # Calculate total performance of the model
     iou = np.mean(iou)
@@ -156,7 +165,7 @@ if __name__ == "__main__":
     # Define transforms for dataset augmentation
     image_and_mask_transform_train=A.Compose([A.Resize(opt.imagesize[0], opt.imagesize[1]),
                                             A.HorizontalFlip(p=0.5),
-                                            A.SafeRotate (limit=5, border_mode=4, always_apply=False, p=0.5),   # TODO: Experiment with the limit
+                                            # A.SafeRotate (limit=5, border_mode=4, always_apply=False, p=0.5),   # TODO: Experiment with the limit
                                             ToTensorV2()])
     
     image_only_transform_train=A.Compose([
@@ -203,6 +212,7 @@ if __name__ == "__main__":
     logging.info(f"Image size: {opt.imagesize}")
     logging.info(f"Number of epochs: {opt.epochs}")
 
+    start_time = time.time()
 
     if opt.train:
 
@@ -218,9 +228,6 @@ if __name__ == "__main__":
         val_f1_over_time = []
         
         best_iou = 0
-
-
-        start_time = time.time()
 
         logging.info(f'--------- Begin training ---------')
 
