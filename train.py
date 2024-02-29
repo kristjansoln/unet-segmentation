@@ -43,6 +43,14 @@ def calculate_recall(pred, gt):
     recall = torch.sum(TP, [1,2]) / (torch.sum(TP, [1,2]) + torch.sum(FN, [1,2]))    
     return recall.mean()
 
+def calculate_pixelaccuracy(pred, gt):
+    TP = torch.logical_and(pred == 1, gt == 1)
+    FP = torch.logical_and(pred == 1, gt == 0)
+    TN = torch.logical_and(pred == 0, gt == 0)
+    FN = torch.logical_and(pred == 0, gt == 1)
+    pa = (torch.sum(TP, [1,2]) + torch.sum(TN, [1,2])) / (torch.sum(TP, [1,2]) + torch.sum(FP, [1,2]) + torch.sum(TN, [1,2]) + torch.sum(FN, [1,2]))
+    return pa.mean()
+
 
 # Base training function
 def train(trainloader, model, device, optimizer, loss_function):
@@ -76,6 +84,7 @@ def test(testloader, model, device, loss_function, save_results=False):
     recall = []
     f1 = []
     avg_val_loss = []
+    pixel_accuracy = []
 
     with torch.no_grad():
         for images, masks, img_paths, mask_paths in tqdm(testloader):
@@ -92,6 +101,7 @@ def test(testloader, model, device, loss_function, save_results=False):
             precision.append(calculate_precision(predicted_masks_bin, masks).cpu().numpy())
             recall.append(calculate_recall(predicted_masks_bin, masks).cpu().numpy())
             f1.append(calculate_f1(predicted_masks_bin, masks).cpu().numpy())
+            pixel_accuracy.append(calculate_pixelaccuracy(predicted_masks_bin, masks).cpu().numpy())
 
             if save_results:
                 if not os.path.exists('./output/test_output'):
@@ -100,6 +110,9 @@ def test(testloader, model, device, loss_function, save_results=False):
                     filename = os.path.basename(mask_paths[i])
                     img = torch.repeat_interleave(predicted_masks_bin[i, :, :, :], 3, dim=2).permute([2, 0, 1]) # Convert to 3 channels?
                     save_image(img.float(), os.path.join('./output/test_output', filename))
+                    # Save performance for individual images
+                    str = f'img:{filename},iou:{iou[-1]:.08f},pa:{pixel_accuracy[-1]:.08f}'
+                    logging.info(str)
             
             # # DEBUG: Preverjanje, ce so maske OK
             # # Te bi mogle bit vse pravilno narisane
@@ -117,8 +130,9 @@ def test(testloader, model, device, loss_function, save_results=False):
     recall = np.mean(recall)
     f1 = np.mean(f1)
     avg_val_loss = np.mean(avg_val_loss)
+    pixel_accuracy = np.mean(pixel_accuracy)
 
-    return iou, precision, recall, f1, avg_val_loss
+    return iou, precision, recall, f1, avg_val_loss, pixel_accuracy
 
 
 # Log any unhandled exceptions
@@ -147,7 +161,10 @@ if __name__ == "__main__":
     options.add_argument('--traincsv', default='dataset/train_rand.csv', help='directory of the train CSV')
     options.add_argument('--testcsv', default='dataset/test_rand.csv', help='directory of the test CSV')
     options.add_argument('--valcsv', default='dataset/val_rand.csv', help='directory of the validation CSV')
-    options.add_argument('--batchsize', type=int, default=2, help='batch size')
+    # options.add_argument('--traincsv', default='dataset/train.csv', help='directory of the train CSV')
+    # options.add_argument('--testcsv', default='dataset/test.csv', help='directory of the test CSV')
+    # options.add_argument('--valcsv', default='dataset/val.csv', help='directory of the validation CSV')
+    options.add_argument('--batchsize', type=int, default=1, help='batch size')
     options.add_argument('--epochs', type=int, default=40, help='number of training epochs')
     options.add_argument('--imagesize', type=int, default=(528, 960), help='size of the image (height, width)') # Needs to be divisible by 16
     # options.add_argument('--imagesize', type=int, default=(624, 1104), help='size of the image (height, width)') # Needs to be divisible by 16
@@ -234,6 +251,7 @@ if __name__ == "__main__":
         val_precision_over_time = []
         val_recall_over_time = []
         val_f1_over_time = []
+        val_pa_over_time = []
         
         best_iou = 0
 
@@ -247,12 +265,13 @@ if __name__ == "__main__":
                 train_loss_over_time.append(avg_loss)
 
                 # Validation            
-                iou, precision, recall, f1, avg_val_loss = test(valloader, model, device, l_bce)
+                iou, precision, recall, f1, avg_val_loss, pa = test(valloader, model, device, l_bce)
                 val_loss_over_time.append(avg_val_loss)
                 val_iou_over_time.append(iou)
                 val_precision_over_time.append(precision)
                 val_recall_over_time.append(recall)
                 val_f1_over_time.append(f1)
+                val_pa_over_time.append(pa)
 
                 # Save network weights if better than previous best
                 if iou > best_iou:
@@ -261,7 +280,7 @@ if __name__ == "__main__":
                     logging.info(f'New best, saving weights')
 
                 curr_lr = optimizer.state_dict()['param_groups'][0]['lr']
-                logging.info(f'Epoch {epoch+1}/{opt.epochs}: Train loss:{avg_loss:.8f},curr.lr:{curr_lr},v.loss:{avg_val_loss:.8f},v.IOU:{iou:.8f},v.precision:{precision:.8f},v.recall:{recall:.8f},v.f1:{f1:.8f},best v.IOU:{best_iou:.8f}')
+                logging.info(f'Epoch {epoch+1}/{opt.epochs}: Train loss:{avg_loss:.8f},curr.lr:{curr_lr},v.loss:{avg_val_loss:.8f},v.IOU:{iou:.8f},v.precision:{precision:.8f},v.recall:{recall:.8f},v.f1:{f1:.8f},v.pixelacc:{pa:.8f},best v.IOU:{best_iou:.8f}')
             
                 scheduler.step(avg_val_loss)
 
@@ -321,8 +340,8 @@ if __name__ == "__main__":
         logging.info(f'Loaded model weights from {weights_path} from epoch {ckpt["epoch"]}')
         model = model.to(device) 
     
-        iou, precision, recall, f1, avg_val_loss = test(testloader, model, device, l_bce, save_results=True)
-        logging.info(f'Test results: loss:{avg_val_loss:.8f},IOU:{iou:.8f},precision:{precision:.8f},recall:{recall:.8f},f1:{f1:.8f}')
+        iou, precision, recall, f1, avg_val_loss, pa = test(testloader, model, device, l_bce, save_results=True)
+        logging.info(f'Test results: loss:{avg_val_loss:.8f},IOU:{iou:.8f},precision:{precision:.8f},recall:{recall:.8f},f1:{f1:.8f},pixelacc:{pa:.8f}')
     
 
     # Print final info
