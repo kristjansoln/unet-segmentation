@@ -1,3 +1,4 @@
+import numpy as np
 import os
 import os.path
 from typing import Any, Callable, cast, Dict, List, Optional, Tuple, Union
@@ -307,8 +308,14 @@ class DatasetFolder(VisionDataset):
 
 
         # Convert mask to binary water/else single channel float
-        mask = (mask == [41, 167, 224]).astype(float32)
-        mask = cvtColor(mask, COLOR_BGR2GRAY)
+        # mask = (mask == [41, 167, 224]).astype(float32)
+        # mask = cvtColor(mask, COLOR_BGR2GRAY)
+        river_rgb = [41, 167, 224]
+
+        mask = np.all(mask == river_rgb, axis=-1)
+        mask=mask*1 #da iz vrednosti True in False dobimo ničle in enke  -> to rabimo (vsaj) za transformacijo
+        mask=mask.astype(np.float64)
+
         
         # from matplotlib import pyplot as plt
         # plt.imshow(mask, interpolation='nearest')

@@ -84,7 +84,7 @@ def test(testloader, model, device, loss_function, save_results=False):
             predictions = model(images)
             out = torch.sigmoid(predictions)
             
-            predicted_masks_bin = torch.sigmoid(out) > 0.5
+            predicted_masks_bin = out > 0.5
 
             # Calculate performance
             avg_val_loss.append(loss_function(predictions, masks).cpu().detach().numpy())
@@ -100,6 +100,7 @@ def test(testloader, model, device, loss_function, save_results=False):
                     filename = os.path.basename(mask_paths[i])
                     img = torch.repeat_interleave(predicted_masks_bin[i, :, :, :], 3, dim=2).permute([2, 0, 1]) # Convert to 3 channels?
                     save_image(img.float(), os.path.join('./output/test_output', filename))
+            
             # # DEBUG: Preverjanje, ce so maske OK
             # # Te bi mogle bit vse pravilno narisane
             # if save_results:
@@ -143,18 +144,18 @@ if __name__ == "__main__":
     options = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     options.add_argument('--train', action='store_true', default=False, help='Train the model.')
     options.add_argument('--test', action='store_true', default=False, help='Test the model.')    
-    # options.add_argument('--traincsv', default='dataset/train.csv', help='directory of the train CSV')
-    # options.add_argument('--testcsv', default='dataset/test.csv', help='directory of the test CSV')
-    # options.add_argument('--valcsv', default='dataset/val.csv', help='directory of the validation CSV')
+    options.add_argument('--traincsv', default='dataset/train_rand.csv', help='directory of the train CSV')
+    options.add_argument('--testcsv', default='dataset/test_rand.csv', help='directory of the test CSV')
+    options.add_argument('--valcsv', default='dataset/val_rand.csv', help='directory of the validation CSV')
     options.add_argument('--batchsize', type=int, default=2, help='batch size')
     options.add_argument('--epochs', type=int, default=40, help='number of training epochs')
-    # options.add_argument('--imagesize', type=int, default=(528, 960), help='size of the image (height, width)') # Needs to be divisible by 16
+    options.add_argument('--imagesize', type=int, default=(528, 960), help='size of the image (height, width)') # Needs to be divisible by 16
     # options.add_argument('--imagesize', type=int, default=(624, 1104), help='size of the image (height, width)') # Needs to be divisible by 16
     
-    options.add_argument('--traincsv', default='dataset/train_rand_short.csv', help='directory of the train CSV')
-    options.add_argument('--testcsv', default='dataset/test_rand_short.csv', help='directory of the test CSV')
-    options.add_argument('--valcsv', default='dataset/val_rand_short.csv', help='directory of the validation CSV')
-    options.add_argument('--imagesize', type=int, default=(288, 512), help='size of the image (height, width)') # Needs to be divisible by 16
+    # options.add_argument('--traincsv', default='dataset/train_rand_short.csv', help='directory of the train CSV')
+    # options.add_argument('--testcsv', default='dataset/test_rand_short.csv', help='directory of the test CSV')
+    # options.add_argument('--valcsv', default='dataset/val_rand_short.csv', help='directory of the validation CSV')
+    # options.add_argument('--imagesize', type=int, default=(288, 512), help='size of the image (height, width)') # Needs to be divisible by 16
 
     opt = options.parse_args()
 
@@ -164,7 +165,7 @@ if __name__ == "__main__":
     # Define transforms for dataset augmentation
     image_and_mask_transform_train=A.Compose([A.Resize(opt.imagesize[0], opt.imagesize[1]),
                                             A.HorizontalFlip(p=0.5),
-                                            # A.SafeRotate (limit=5, border_mode=4, always_apply=False, p=0.5),   # TODO: Experiment with the limit
+                                            A.SafeRotate (limit=5, border_mode=4, always_apply=False, p=0.5),   # TODO: Experiment with the limit
                                             ToTensorV2()],
                                             is_check_shapes=False)
     
@@ -212,6 +213,9 @@ if __name__ == "__main__":
     logging.info(f"Train dataset stats: number of images: {len(train_data)}")
     logging.info(f"Validation dataset stats: number of images: {len(val_data)}")
     logging.info(f"Test dataset stats: number of images: {len(test_data)}")
+    logging.info(f"Train dataset path: {opt.traincsv}")
+    logging.info(f"Validation dataset path: {opt.valcsv}")
+    logging.info(f"Test dataset path: {opt.testcsv}")
     logging.info(f"Batch size: {opt.batchsize}")
     logging.info(f"Image size: {opt.imagesize}")
     logging.info(f"Number of epochs: {opt.epochs}")
@@ -222,7 +226,7 @@ if __name__ == "__main__":
 
         # Initialize optimizer and scheduler
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, betas=(0.9, 0.999))
-        scheduler = ReduceLROnPlateau(optimizer, mode='min', threshold_mode='rel', factor=0.1, patience=3, threshold=0.01, cooldown=0, eps=1e-5, verbose=True) 
+        scheduler = ReduceLROnPlateau(optimizer, mode='min', threshold_mode='rel', factor=0.1, patience=5, threshold=0.01, cooldown=2, eps=1e-5, verbose=True) 
 
         train_loss_over_time = []
         val_loss_over_time = []
@@ -271,9 +275,52 @@ if __name__ == "__main__":
                 break
         
         logging.info('----------- End training -----------')
+
+        current_datetime = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        # Plot loss over time
+        plt.figure(figsize=(15, 10))
+        plt.plot(range(len(train_loss_over_time[1:])), train_loss_over_time[1:], c="dodgerblue")
+        plt.plot(range(len(val_loss_over_time[1:])), val_loss_over_time[1:], c="r")
+        plt.title("Loss per epoch", fontsize=18)
+        plt.xlabel("epoch", fontsize=18)
+        plt.ylabel("loss", fontsize=18)
+        plt.legend(['Training loss', 'Validation loss'], fontsize=18)
+        filename = f'loss-{current_datetime}.svg'
+        plt.savefig(os.path.join('output', filename))
+        
+        # Plot IOU over time
+        plt.figure(figsize=(15, 10))
+        plt.plot(range(len(val_iou_over_time[1:])), val_iou_over_time[1:], c="dodgerblue")
+        plt.title("IoU per epoch", fontsize=18)
+        plt.xlabel("epoch", fontsize=18)
+        # plt.ylabel("", fontsize=18)
+        plt.legend(['IoU'], fontsize=18)
+        filename = f'iou-{current_datetime}.svg'
+        plt.savefig( os.path.join('output', filename))
+        
+        # Plot F1 over time
+        plt.figure(figsize=(15, 10))
+        plt.plot(range(len(val_f1_over_time[1:])), val_f1_over_time[1:], c="dodgerblue")
+        plt.title("F1 per epoch", fontsize=18)
+        plt.xlabel("epoch", fontsize=18)
+        # plt.ylabel("", fontsize=18)
+        plt.legend(['F1'], fontsize=18)
+        filename = f'f1-{current_datetime}.svg'
+        plt.savefig( os.path.join('output', filename))
     
     if opt.test:
         logging.info(f'--------- Begin testing ---------')
+
+        # Load best saved weights
+        weights_path = './output/weights.pth'
+        # weights_path = '/home/ksoln/Desktop/st-local/seminar/water-segmentation/output-ucenje6/weights.pth'
+
+        ckpt = torch.load(weights_path)
+        model.load_state_dict(ckpt['state_dict'])
+        logging.info(f'Loaded model weights from {weights_path} from epoch {ckpt["epoch"]}')
+        model = model.to(device) 
+    
         iou, precision, recall, f1, avg_val_loss = test(testloader, model, device, l_bce, save_results=True)
         logging.info(f'Test results: loss:{avg_val_loss:.8f},IOU:{iou:.8f},precision:{precision:.8f},recall:{recall:.8f},f1:{f1:.8f}')
     
@@ -282,38 +329,5 @@ if __name__ == "__main__":
     end_time = time.time()
     elapsed_time = datetime.timedelta(seconds=(end_time - start_time))
     logging.info(f'Total time: {elapsed_time}')
-
-    current_datetime = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    # Plot loss over time
-    plt.figure(figsize=(15, 10))
-    plt.plot(range(len(train_loss_over_time[1:])), train_loss_over_time[1:], c="dodgerblue")
-    plt.plot(range(len(val_loss_over_time[1:])), val_loss_over_time[1:], c="r")
-    plt.title("Loss per epoch", fontsize=18)
-    plt.xlabel("epoch", fontsize=18)
-    plt.ylabel("loss", fontsize=18)
-    plt.legend(['Training loss', 'Validation loss'], fontsize=18)
-    filename = f'loss-{current_datetime}.svg'
-    plt.savefig(os.path.join('output', filename))
-    
-    # Plot IOU over time
-    plt.figure(figsize=(15, 10))
-    plt.plot(range(len(val_iou_over_time[1:])), val_iou_over_time[1:], c="dodgerblue")
-    plt.title("IoU per epoch", fontsize=18)
-    plt.xlabel("epoch", fontsize=18)
-    # plt.ylabel("", fontsize=18)
-    plt.legend(['IoU'], fontsize=18)
-    filename = f'iou-{current_datetime}.svg'
-    plt.savefig( os.path.join('output', filename))
-    
-    # Plot F1 over time
-    plt.figure(figsize=(15, 10))
-    plt.plot(range(len(val_f1_over_time[1:])), val_f1_over_time[1:], c="dodgerblue")
-    plt.title("F1 per epoch", fontsize=18)
-    plt.xlabel("epoch", fontsize=18)
-    # plt.ylabel("", fontsize=18)
-    plt.legend(['F1'], fontsize=18)
-    filename = f'f1-{current_datetime}.svg'
-    plt.savefig( os.path.join('output', filename))
 
     plt.show()
