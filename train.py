@@ -104,26 +104,16 @@ def test(testloader, model, device, loss_function, save_results=False):
             pixel_accuracy.append(calculate_pixelaccuracy(predicted_masks_bin, masks).cpu().numpy())
 
             if save_results:
-                if not os.path.exists('./output/test_output'):
-                    os.mkdir('./output/test_output')
+                if not os.path.exists('./output/generated_masks'):
+                    os.mkdir('./output/generated_masks')
                 for i in range(predicted_masks_bin.shape[0]):
                     filename = os.path.basename(mask_paths[i])
                     img = torch.repeat_interleave(predicted_masks_bin[i, :, :, :], 3, dim=2).permute([2, 0, 1]) # Convert to 3 channels?
-                    save_image(img.float(), os.path.join('./output/test_output', filename))
+                    save_image(img.float(), os.path.join('./output/generated_masks', filename))
                     # Save performance for individual images
                     str = f'img:{filename},iou:{iou[-1]:.08f},pa:{pixel_accuracy[-1]:.08f}'
                     logging.info(str)
             
-            # # DEBUG: Preverjanje, ce so maske OK
-            # # Te bi mogle bit vse pravilno narisane
-            # if save_results:
-            #     if not os.path.exists('./output/test_output_DEBUG_MASKE'):
-            #         os.mkdir('./output/test_output_DEBUG_MASKE')
-            #     for i in range(masks.shape[0]):
-            #         filename = os.path.basename(mask_paths[i])
-            #         img = torch.repeat_interleave(masks[i, :, :, :], 3, dim=2).permute([2, 0, 1]) # Convert to 3 channels?
-            #         save_image(img.float(), os.path.join('./output/test_output_DEBUG_MASKE', filename))
-
     # Calculate total performance of the model
     iou = np.mean(iou)
     precision = np.mean(precision)
@@ -158,21 +148,12 @@ if __name__ == "__main__":
     options = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     options.add_argument('--train', action='store_true', default=False, help='Train the model.')
     options.add_argument('--test', action='store_true', default=False, help='Test the model.')    
-    options.add_argument('--traincsv', default='dataset/train_rand.csv', help='directory of the train CSV')
-    options.add_argument('--testcsv', default='dataset/test_rand.csv', help='directory of the test CSV')
-    options.add_argument('--valcsv', default='dataset/val_rand.csv', help='directory of the validation CSV')
-    # options.add_argument('--traincsv', default='dataset/train.csv', help='directory of the train CSV')
-    # options.add_argument('--testcsv', default='dataset/test.csv', help='directory of the test CSV')
-    # options.add_argument('--valcsv', default='dataset/val.csv', help='directory of the validation CSV')
-    options.add_argument('--batchsize', type=int, default=1, help='batch size')
-    options.add_argument('--epochs', type=int, default=40, help='number of training epochs')
-    options.add_argument('--imagesize', type=int, default=(528, 960), help='size of the image (height, width)') # Needs to be divisible by 16
-    # options.add_argument('--imagesize', type=int, default=(624, 1104), help='size of the image (height, width)') # Needs to be divisible by 16
-    
-    # options.add_argument('--traincsv', default='dataset/train_rand_short.csv', help='directory of the train CSV')
-    # options.add_argument('--testcsv', default='dataset/test_rand_short.csv', help='directory of the test CSV')
-    # options.add_argument('--valcsv', default='dataset/val_rand_short.csv', help='directory of the validation CSV')
-    # options.add_argument('--imagesize', type=int, default=(288, 512), help='size of the image (height, width)') # Needs to be divisible by 16
+    options.add_argument('--traincsv', default='dataset/train.csv', help='Directory of the train CSV')
+    options.add_argument('--testcsv', default='dataset/test.csv', help='Directory of the test CSV')
+    options.add_argument('--valcsv', default='dataset/val.csv', help='Directory of the validation CSV')
+    options.add_argument('--batchsize', type=int, default=1, help='Batch size')
+    options.add_argument('--epochs', type=int, default=40, help='Max number of epochs to train the model')
+    options.add_argument('--imagesize', type=int, default=(528, 960), nargs="+", help='What size to transform the images to before running training (height, width). Must be divisible by 16.') # Needs to be divisible by 16
 
     opt = options.parse_args()
 
@@ -187,13 +168,10 @@ if __name__ == "__main__":
                                             is_check_shapes=False)
     
     image_only_transform_train=A.Compose([
-                                        # TODO: Experiment with enabling this
                                         # A.GaussNoise(var_limit=(1.0, 10.0), mean=0, per_channel=True, always_apply=False, p=0.5), 
                                         # A.HueSaturationValue(hue_shift_limit=10, sat_shift_limit=20, val_shift_limit=10, always_apply=False, p=0.5),
                                         A.Normalize(PRE__MEAN, PRE__STD),
                                         A.RandomBrightnessContrast(),
-                                        # A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225), max_pixel_value=255.0, always_apply=False, p=1.0),
-                                        # A.Resize(621, 1104), # Convert the image to original mask dimensions to avoid errors
                                         ],
                                         is_check_shapes=False)
     
@@ -202,9 +180,7 @@ if __name__ == "__main__":
                                             ToTensorV2()],
                                             is_check_shapes=False)
     
-    image_only_transform_test=A.Compose([A.Normalize(PRE__MEAN, PRE__STD), 
-                                        #  A.Resize(621, 1104) # Convert the image to original mask dimensions to avoid errors
-                                        ],
+    image_only_transform_test=A.Compose([A.Normalize(PRE__MEAN, PRE__STD)],
                                         is_check_shapes=False
                                         ) 
     
@@ -333,7 +309,6 @@ if __name__ == "__main__":
 
         # Load best saved weights
         weights_path = './output/weights.pth'
-        # weights_path = '/home/ksoln/Desktop/st-local/seminar/water-segmentation/output-ucenje6/weights.pth'
 
         ckpt = torch.load(weights_path)
         model.load_state_dict(ckpt['state_dict'])

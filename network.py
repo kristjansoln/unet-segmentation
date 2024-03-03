@@ -87,9 +87,6 @@ class UNet(nn.Module):
         # Decoder
         concat5 = torch.cat([features4, features5], dim=1)
         features6 = self.block6(concat5)
-        # # TODO: Is it possible to delete e.g. features4 and features5 at this point to free up some memory?
-        # del features4, features5
-        # torch.cuda.empty_cache()  # Only if you are on GPU
         concat6 = torch.cat([features3, features6], dim=1)
         features7 = self.block7(concat6)
         concat7 = torch.cat([features2, features7], dim=1)

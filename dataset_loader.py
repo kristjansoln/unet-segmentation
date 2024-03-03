@@ -9,6 +9,8 @@ from PIL import Image
 from torchvision.datasets.vision import VisionDataset
 import csv
 
+# Taken from https://pytorch.org/vision/main/_modules/torchvision/datasets/folder.html#DatasetFolder
+
 # IMAGE LOADERS
 
 IMG_EXTENSIONS = (".jpg", ".jpeg", ".png", ".ppm", ".bmp", ".pgm", ".tif", ".tiff", ".webp")
@@ -222,19 +224,14 @@ class DatasetFolder(VisionDataset):
             List[Tuple[str, str]]: samples of a form (path_to_sample, path_to_mask)
         """
 
-        img_dir = os.path.join(os.path.dirname(csvpath), 'RGB')
-        mask_dir = os.path.join(os.path.dirname(csvpath), 'WASR')
+        img_dir = os.path.join(os.path.dirname(csvpath), 'images')
+        mask_dir = os.path.join(os.path.dirname(csvpath), 'masks')
 
         # if (extensions == None) ^ (is_valid_file == None):
         #     raise ValueError("both extensions and is_valid_file should not be passed")
 
         samples = []
 
-        # Get list of images
-        # for root, dirs, files in os.walk(img_dir):
-        #     for file in files:
-        #         img_path = os.path.relpath(os.path.join(root, file), img_dir)
-        #         img_paths.append(img_path)
         with open(csvpath, newline='') as csvfile:
             reader = csv.reader(csvfile)
             for filename in reader:
@@ -299,7 +296,6 @@ class DatasetFolder(VisionDataset):
         Returns:
             tuple: (img, mask, img_path, mask_path) where target is class_index of the target class.
         """
-        # path, target = self.samples[index]
         img_path, mask_path = self.samples[index]
 
         # Read image and convert to numpy array
@@ -308,15 +304,11 @@ class DatasetFolder(VisionDataset):
 
 
         # Convert mask to binary water/else single channel float
-        # mask = (mask == [41, 167, 224]).astype(float32)
-        # mask = cvtColor(mask, COLOR_BGR2GRAY)
         river_rgb = [41, 167, 224]
-
         mask = np.all(mask == river_rgb, axis=-1)
-        mask=mask*1 #da iz vrednosti True in False dobimo ničle in enke  -> to rabimo (vsaj) za transformacijo
+        mask=mask*1
         mask=mask.astype(np.float64)
 
-        
         # from matplotlib import pyplot as plt
         # plt.imshow(mask, interpolation='nearest')
         # plt.show()
@@ -332,25 +324,6 @@ class DatasetFolder(VisionDataset):
             transformed = self.transform(image=img_t, mask=mask)
             img_tt = transformed['image']
             mask_tt = transformed['mask']
-
-        # # Display transformed images
-        # from matplotlib import pyplot as plt
-        # print(f'img_path: {img_path}')
-        # fig = plt.figure(figsize=(8, 8))
-        # fig.add_subplot(1, 4, 1)
-        # plt.imshow(img)
-        # plt.title('orig. img')
-        # fig.add_subplot(1, 4, 2)
-        # plt.imshow(img_t)
-        # plt.title('img. only transform')
-        # fig.add_subplot(1, 4, 3)
-        # plt.imshow(img_tt.permute(1, 2, 0)  )
-        # plt.title('img. final transform')
-        # fig.add_subplot(1, 4, 4)
-        # plt.imshow(mask_tt)
-        # plt.title('mask final transform')
-        # plt.show()
-        # raise(Exception)
 
         return img_tt, mask_tt, img_path, mask_path
 
